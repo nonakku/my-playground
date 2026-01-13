@@ -1,0 +1,2040 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>有接点回路シミュレーションパズル</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #1a1a2e;
+            color: #fff;
+            overflow: hidden;
+            width: 100%;
+            height: 100vh;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100%;
+        }
+
+        /* ヘッダー（レベル選択） */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background-color: #0f0f23;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 20px;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            gap: 20px;
+        }
+
+        .level-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-level {
+            padding: 10px 20px;
+            background-color: #16213e;
+            border: 2px solid #4dd0e1;
+            color: #4dd0e1;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-level:hover {
+            background-color: #4dd0e1;
+            color: #0f0f23;
+        }
+
+        .btn-level.active {
+            background-color: #4dd0e1;
+            color: #0f0f23;
+        }
+
+        .task-display {
+            font-size: 18px;
+            color: #ffd700;
+            flex: 1;
+            text-align: center;
+        }
+
+        /* メインコンテンツ */
+        .main-content {
+            display: flex;
+            flex-direction: row;
+            margin-top: 60px;
+            height: calc(100vh - 120px);
+            width: 100%;
+        }
+
+        /* ワークスペース（左側） */
+        .workspace {
+            flex: 1;
+            min-width: 0;
+            background-color: #16213e;
+            position: relative;
+            overflow: hidden;
+            border: 2px solid #4dd0e1;
+            margin: 10px;
+            border-radius: 8px;
+        }
+
+        /* グリッド背景 */
+        .grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* SVGキャンバス */
+        #wireSvg {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* 配置されたパーツ */
+        .dropped-part {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            cursor: move;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid #4dd0e1;
+            border-radius: 8px;
+            z-index: 20;
+            transition: transform 0.1s ease;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .dropped-part:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(77, 208, 225, 0.3);
+        }
+
+        /* リレー用の特殊なパーツ */
+        .dropped-part.relay {
+            width: 120px;
+            height: 100px;
+        }
+
+        /* タイマー用の特殊なパーツ */
+        .dropped-part.timer {
+            width: 100px;
+            height: 80px;
+        }
+
+        /* 接続点 */
+        .connection-point {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #4dd0e1;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            cursor: crosshair;
+            z-index: 100;
+            transition: all 0.2s ease;
+            pointer-events: all;
+        }
+
+        .connection-point:hover {
+            transform: scale(1.3);
+            background-color: #ffd700;
+        }
+
+        .connection-point.connected {
+            background-color: #4caf50;
+        }
+
+        .connection-point.selected {
+            background-color: #ffd700;
+            transform: scale(1.3);
+        }
+
+        /* 基本接続点位置 */
+        .connection-point.top { top: -6px; left: 50%; transform: translateX(-50%); }
+        .connection-point.bottom { bottom: -6px; left: 50%; transform: translateX(-50%); }
+        .connection-point.left { left: -6px; top: 50%; transform: translateY(-50%); }
+        .connection-point.right { right: -6px; top: 50%; transform: translateY(-50%); }
+
+        /* リレー専用接続点 */
+        .connection-point.coil-plus { top: -6px; left: 20%; transform: translateX(-50%); }
+        .connection-point.coil-minus { bottom: -6px; left: 20%; transform: translateX(-50%); }
+        .connection-point.a-contact { top: -6px; right: 20%; transform: translateX(50%); }
+        .connection-point.b-contact { bottom: -6px; right: 20%; transform: translateX(50%); }
+        .connection-point.c-contact { right: -6px; top: 50%; transform: translateY(-50%); }
+
+        /* タイマー専用接続点 */
+        .connection-point.input-plus { top: -6px; left: 25%; transform: translateX(-50%); }
+        .connection-point.input-minus { bottom: -6px; left: 25%; transform: translateX(-50%); }
+        .connection-point.output-plus { top: -6px; right: 25%; transform: translateX(50%); }
+        .connection-point.output-minus { bottom: -6px; right: 25%; transform: translateX(50%); }
+
+        /* センサー専用接続点 */
+        .connection-point.power-plus { top: -6px; left: 25%; transform: translateX(-50%); }
+        .connection-point.power-minus { bottom: -6px; left: 25%; transform: translateX(-50%); }
+        .connection-point.sensor-out-plus { top: -6px; right: 25%; transform: translateX(50%); }
+        .connection-point.sensor-out-minus { bottom: -6px; right: 25%; transform: translateX(50%); }
+
+        /* パーツパネル（右側） */
+        .parts-panel {
+            width: 300px;
+            min-width: 300px;
+            flex-shrink: 0;
+            background-color: #0f0f23;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: -5px 0 15px rgba(0,0,0,0.3);
+        }
+
+        .parts-panel h2 {
+            font-size: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            color: #4dd0e1;
+        }
+
+        /* パーツアイテム */
+        .part-item {
+            width: 100px;
+            height: 100px;
+            margin: 10px auto;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #16213e;
+            border: 2px solid #4dd0e1;
+            border-radius: 10px;
+            transition: all 0.3s;
+            flex-direction: column;
+            padding: 10px;
+        }
+
+        .part-item:hover {
+            background-color: #1e2a4a;
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(77, 208, 225, 0.3);
+        }
+
+        .part-item.dragging {
+            opacity: 0.5;
+            cursor: grabbing;
+        }
+
+        /* 電圧セレクター */
+        .voltage-selector {
+            position: absolute;
+            bottom: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0f0f23;
+            padding: 5px;
+            border-radius: 5px;
+            font-size: 12px;
+            display: none;
+        }
+
+        .dropped-part.battery .voltage-selector,
+        .dropped-part.relay .voltage-selector,
+        .dropped-part.timer .voltage-selector {
+            display: block;
+        }
+
+        /* フッター（操作ボタン） */
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background-color: #0f0f23;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .btn-answer {
+            background-color: #4caf50;
+            color: white;
+        }
+
+        .btn-answer:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .btn-example {
+            background-color: #ff9800;
+            color: white;
+        }
+
+        .btn-example:hover {
+            background-color: #f57c00;
+            transform: translateY(-2px);
+        }
+
+        .btn-reset {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .btn-reset:hover {
+            background-color: #da190b;
+            transform: translateY(-2px);
+        }
+
+        /* ワイヤー */
+        .wire-path {
+            stroke: #666;
+            stroke-width: 3;
+            fill: none;
+            cursor: pointer;
+            transition: stroke 0.3s ease;
+            pointer-events: stroke;
+        }
+
+        .wire-path:hover {
+            stroke: #888;
+        }
+
+        .wire-path.powered {
+            stroke: #ffd700;
+            stroke-width: 5;
+            filter: drop-shadow(0 0 5px #ffd700);
+        }
+
+        /* 電流アニメーション */
+        .current-dot {
+            fill: #ffd700;
+            r: 3;
+            filter: drop-shadow(0 0 5px #ffd700);
+        }
+
+        /* コンポーネントの状態 */
+        .lamp-bulb {
+            transition: all 0.3s ease;
+        }
+
+        .dropped-part.lit .lamp-bulb {
+            fill: #ffd700 !important;
+            filter: drop-shadow(0 0 30px #ffd700) drop-shadow(0 0 50px #ffd700);
+        }
+
+        .dropped-part.lit .lamp-glow {
+            opacity: 1;
+        }
+
+        .lamp-glow {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .dropped-part.running svg {
+            animation: rotate 1s linear infinite;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .dropped-part.sensor-active {
+            background-color: rgba(0, 255, 0, 0.2);
+        }
+
+        /* メッセージ */
+        .message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 30px 50px;
+            border-radius: 10px;
+            font-size: 24px;
+            z-index: 2000;
+            display: none;
+            text-align: center;
+        }
+
+        .message.success {
+            border: 3px solid #4caf50;
+            color: #4caf50;
+        }
+
+        .message.error {
+            border: 3px solid #f44336;
+            color: #f44336;
+        }
+
+        /* エラー表示 */
+        .error-indicator {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #f44336;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="level-buttons">
+                <button class="btn-level active" onclick="selectLevel(1)">レベル1</button>
+                <button class="btn-level" onclick="selectLevel(2)">レベル2</button>
+                <button class="btn-level" onclick="selectLevel(3)">レベル3</button>
+                <button class="btn-level" onclick="selectLevel(4)">レベル4</button>
+                <button class="btn-level" onclick="selectLevel(5)">レベル5</button>
+            </div>
+            <div class="task-display" id="taskDisplay">スイッチでランプを点灯させてください</div>
+        </header>
+
+        <div class="main-content">
+            <div class="workspace" id="workspace">
+                <div class="grid"></div>
+                <svg id="wireSvg"></svg>
+            </div>
+
+            <div class="parts-panel">
+                <h2>パーツ一覧</h2>
+                
+                <div class="part-item" draggable="true" data-type="battery">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <rect x="10" y="20" width="40" height="20" fill="#e74c3c" stroke="#fff" stroke-width="2"/>
+                        <rect x="50" y="25" width="5" height="10" fill="#e74c3c"/>
+                        <text x="30" y="35" text-anchor="middle" fill="white" font-size="12">電源</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="switch">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <circle cx="15" cy="30" r="5" fill="#4dd0e1" stroke="#fff" stroke-width="2"/>
+                        <circle cx="45" cy="30" r="5" fill="#4dd0e1" stroke="#fff" stroke-width="2"/>
+                        <line x1="20" y1="30" x2="40" y2="20" stroke="#fff" stroke-width="3"/>
+                        <text x="30" y="50" text-anchor="middle" fill="white" font-size="10">スイッチ</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="button">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <circle cx="30" cy="30" r="20" fill="#f44336" stroke="#fff" stroke-width="2"/>
+                        <circle cx="30" cy="30" r="15" fill="#ff6666"/>
+                        <text x="30" y="35" text-anchor="middle" fill="white" font-size="10">ボタン</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="lamp">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <circle cx="30" cy="25" r="15" fill="#666" stroke="#fff" stroke-width="2" class="lamp-bulb"/>
+                        <rect x="25" y="35" width="10" height="10" fill="#444" stroke="#fff" stroke-width="2"/>
+                        <text x="30" y="55" text-anchor="middle" fill="white" font-size="10">ランプ</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="relay">
+                    <svg width="80" height="60" viewBox="0 0 80 60">
+                        <rect x="5" y="10" width="70" height="40" fill="#2c3e50" stroke="#fff" stroke-width="2"/>
+                        <circle cx="20" cy="30" r="8" fill="#e74c3c" stroke="#fff" stroke-width="1"/>
+                        <text x="20" y="34" text-anchor="middle" fill="white" font-size="8">コイル</text>
+                        <text x="60" y="20" fill="white" font-size="8">a</text>
+                        <text x="60" y="40" fill="white" font-size="8">b</text>
+                        <text x="65" y="30" fill="white" font-size="8">c</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="timer">
+                    <svg width="80" height="60" viewBox="0 0 80 60">
+                        <rect x="10" y="15" width="60" height="30" fill="#9c27b0" stroke="#fff" stroke-width="2"/>
+                        <text x="40" y="30" text-anchor="middle" fill="white" font-size="10">タイマー</text>
+                        <text x="40" y="42" text-anchor="middle" fill="white" font-size="8">3秒</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="motor">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <circle cx="30" cy="30" r="20" fill="#0066cc" stroke="#fff" stroke-width="2"/>
+                        <text x="30" y="35" text-anchor="middle" fill="white" font-size="10">モーター</text>
+                    </svg>
+                </div>
+                
+                <div class="part-item" draggable="true" data-type="sensor">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <rect x="15" y="15" width="30" height="30" fill="#00cc66" stroke="#fff" stroke-width="2"/>
+                        <text x="30" y="35" text-anchor="middle" fill="white" font-size="10">センサー</text>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <button class="btn-answer" onclick="checkAnswer()">解答</button>
+            <button class="btn-example" onclick="showExample()">模範解答</button>
+            <button class="btn-reset" onclick="resetWorkspace()">リセット</button>
+        </footer>
+    </div>
+
+    <div class="message" id="messageBox"></div>
+
+    <script>
+        let draggedElement = null;
+        let droppedParts = [];
+        let connections = [];
+        let selectedConnection = null;
+        let currentLevel = 1;
+        let currentAnimations = [];
+        let isDraggingWire = false;
+        let dragWire = null;
+        let dragStartPoint = null;
+        
+        const partSvgs = {
+            battery: `<svg width="60" height="60" viewBox="0 0 60 60">
+                <rect x="10" y="20" width="40" height="20" fill="#e74c3c" stroke="#fff" stroke-width="2"/>
+                <rect x="50" y="25" width="5" height="10" fill="#e74c3c"/>
+                <text x="30" y="35" text-anchor="middle" fill="white" font-size="12">電源</text>
+            </svg>
+            <select class="voltage-selector" onchange="updateVoltage(this)">
+                <option value="24">24V</option>
+                <option value="100">100V</option>
+            </select>`,
+            
+            switch: `<svg width="60" height="60" viewBox="0 0 60 60">
+                <circle cx="15" cy="30" r="5" fill="#4dd0e1" stroke="#fff" stroke-width="2"/>
+                <circle cx="45" cy="30" r="5" fill="#4dd0e1" stroke="#fff" stroke-width="2"/>
+                <line class="switch-lever" x1="20" y1="30" x2="40" y2="20" stroke="#fff" stroke-width="3"/>
+                <text x="30" y="50" text-anchor="middle" fill="white" font-size="10">スイッチ</text>
+            </svg>`,
+            
+            button: `<svg width="60" height="60" viewBox="0 0 60 60">
+                <circle cx="30" cy="30" r="20" fill="#f44336" stroke="#fff" stroke-width="2"/>
+                <circle cx="30" cy="30" r="15" fill="#ff6666"/>
+                <text x="30" y="35" text-anchor="middle" fill="white" font-size="10">ボタン</text>
+            </svg>`,
+            
+            lamp: `<svg width="60" height="60" viewBox="0 0 60 60">
+                <defs>
+                    <radialGradient id="lampGlow">
+                        <stop offset="0%" style="stop-color:#ffd700;stop-opacity:0.8" />
+                        <stop offset="100%" style="stop-color:#ffd700;stop-opacity:0" />
+                    </radialGradient>
+                </defs>
+                <circle cx="30" cy="25" r="25" fill="url(#lampGlow)" class="lamp-glow"/>
+                <circle cx="30" cy="25" r="15" fill="#666" stroke="#fff" stroke-width="2" class="lamp-bulb"/>
+                <rect x="25" y="35" width="10" height="10" fill="#444" stroke="#fff" stroke-width="2"/>
+                <text x="30" y="55" text-anchor="middle" fill="white" font-size="10">ランプ</text>
+            </svg>`,
+            
+            relay: `<svg width="120" height="100" viewBox="0 0 120 100">
+                <rect x="10" y="20" width="100" height="60" fill="#2c3e50" stroke="#fff" stroke-width="2"/>
+                <rect x="20" y="40" width="30" height="20" fill="#8b4513" stroke="#fff" stroke-width="1"/>
+                <text x="35" y="54" text-anchor="middle" fill="white" font-size="10">コイル</text>
+                <circle cx="80" cy="30" r="3" fill="#4dd0e1"/>
+                <text x="88" y="34" fill="white" font-size="10">a</text>
+                <circle cx="80" cy="70" r="3" fill="#ffd700"/>
+                <text x="88" y="74" fill="white" font-size="10">b</text>
+                <circle cx="95" cy="50" r="3" fill="#fff"/>
+                <text x="102" y="54" fill="white" font-size="10">c</text>
+                <line class="relay-contact" x1="95" y1="50" x2="80" y2="70" stroke="#fff" stroke-width="2"/>
+            </svg>
+            <select class="voltage-selector" onchange="updateVoltage(this)">
+                <option value="24">24V</option>
+                <option value="100">100V</option>
+            </select>`,
+            
+            timer: `<svg width="100" height="80" viewBox="0 0 100 80">
+                <rect x="10" y="20" width="80" height="40" fill="#9c27b0" stroke="#fff" stroke-width="2"/>
+                <text x="50" y="40" text-anchor="middle" fill="white" font-size="12">タイマー</text>
+                <text x="50" y="55" text-anchor="middle" fill="white" font-size="10" class="timer-display">3秒</text>
+            </svg>
+            <select class="voltage-selector" onchange="updateTimerSettings(this)">
+                <option value="on-delay-1">オンディレー 1秒</option>
+                <option value="on-delay-3" selected>オンディレー 3秒</option>
+                <option value="on-delay-5">オンディレー 5秒</option>
+                <option value="off-delay-1">オフディレー 1秒</option>
+                <option value="off-delay-3">オフディレー 3秒</option>
+                <option value="off-delay-5">オフディレー 5秒</option>
+            </select>`,
+            
+            motor: `<svg width="60" height="60" viewBox="0 0 60 60">
+                <circle cx="30" cy="30" r="20" fill="#0066cc" stroke="#fff" stroke-width="2"/>
+                <text x="30" y="35" text-anchor="middle" fill="white" font-size="10">モーター</text>
+            </svg>`,
+            
+            sensor: `<svg width="60" height="60" viewBox="0 0 60 60">
+                <rect x="15" y="15" width="30" height="30" fill="#00cc66" stroke="#fff" stroke-width="2"/>
+                <text x="30" y="35" text-anchor="middle" fill="white" font-size="10">センサー</text>
+            </svg>`
+        };
+        
+        const levels = [
+            {
+                level: 1,
+                task: "スイッチでランプを点灯させてください",
+                checkWin: () => {
+                    const lamp = droppedParts.find(p => p.type === 'lamp');
+                    const switch_ = droppedParts.find(p => p.type === 'switch');
+                    return lamp && switch_ && switch_.on && lamp.powered;
+                },
+                example: {
+                    parts: [
+                        { type: 'battery', x: 100, y: 200, voltage: '24' },
+                        { type: 'switch', x: 250, y: 200 },
+                        { type: 'lamp', x: 400, y: 200 }
+                    ],
+                    connections: [
+                        { from: { partIndex: 0, position: 'right' }, to: { partIndex: 1, position: 'left' } },
+                        { from: { partIndex: 1, position: 'right' }, to: { partIndex: 2, position: 'left' } },
+                        { from: { partIndex: 2, position: 'right' }, to: { partIndex: 0, position: 'left' } }
+                    ]
+                }
+            },
+            {
+                level: 2,
+                task: "ボタンを押している間だけランプを点灯させてください",
+                checkWin: () => {
+                    const lamp = droppedParts.find(p => p.type === 'lamp');
+                    const button = droppedParts.find(p => p.type === 'button');
+                    return lamp && button && button.pressed && lamp.powered;
+                },
+                example: {
+                    parts: [
+                        { type: 'battery', x: 100, y: 200, voltage: '24' },
+                        { type: 'button', x: 250, y: 200 },
+                        { type: 'lamp', x: 400, y: 200 }
+                    ],
+                    connections: [
+                        { from: { partIndex: 0, position: 'right' }, to: { partIndex: 1, position: 'left' } },
+                        { from: { partIndex: 1, position: 'right' }, to: { partIndex: 2, position: 'left' } },
+                        { from: { partIndex: 2, position: 'right' }, to: { partIndex: 0, position: 'left' } }
+                    ]
+                }
+            },
+            {
+                level: 3,
+                task: "ボタンでリレーを動作させ、ランプを点灯させてください",
+                checkWin: () => {
+                    const lamp = droppedParts.find(p => p.type === 'lamp');
+                    const relay = droppedParts.find(p => p.type === 'relay');
+                    const button = droppedParts.find(p => p.type === 'button');
+                    return lamp && relay && button && button.pressed && relay.relayActive && lamp.powered;
+                },
+                example: {
+                    parts: [
+                        { type: 'battery', x: 100, y: 150, voltage: '24' },
+                        { type: 'button', x: 250, y: 150 },
+                        { type: 'relay', x: 400, y: 200, voltage: '24' },
+                        { type: 'lamp', x: 600, y: 200 }
+                    ],
+                    connections: [
+                        { from: { partIndex: 0, position: 'right' }, to: { partIndex: 1, position: 'left' } },
+                        { from: { partIndex: 1, position: 'right' }, to: { partIndex: 2, position: 'coil-plus' } },
+                        { from: { partIndex: 2, position: 'coil-minus' }, to: { partIndex: 0, position: 'bottom' } },
+                        { from: { partIndex: 0, position: 'top' }, to: { partIndex: 2, position: 'c-contact' } },
+                        { from: { partIndex: 2, position: 'a-contact' }, to: { partIndex: 3, position: 'left' } },
+                        { from: { partIndex: 3, position: 'right' }, to: { partIndex: 0, position: 'left' } }
+                    ]
+                }
+            },
+            {
+                level: 4,
+                task: "ボタンを押して3秒後にランプを点灯させてください",
+                checkWin: () => {
+                    const lamp = droppedParts.find(p => p.type === 'lamp');
+                    const timer = droppedParts.find(p => p.type === 'timer');
+                    return lamp && timer && timer.outputActive && lamp.powered;
+                },
+                example: {
+                    parts: [
+                        { type: 'battery', x: 100, y: 200, voltage: '24' },
+                        { type: 'button', x: 250, y: 150 },
+                        { type: 'timer', x: 400, y: 200, timerType: 'on-delay', delay: 3 },
+                        { type: 'lamp', x: 600, y: 200 }
+                    ],
+                    connections: [
+                        { from: { partIndex: 0, position: 'right' }, to: { partIndex: 1, position: 'left' } },
+                        { from: { partIndex: 1, position: 'right' }, to: { partIndex: 2, position: 'input-plus' } },
+                        { from: { partIndex: 2, position: 'input-minus' }, to: { partIndex: 0, position: 'bottom' } },
+                        { from: { partIndex: 0, position: 'top' }, to: { partIndex: 2, position: 'output-plus' } },
+                        { from: { partIndex: 2, position: 'output-minus' }, to: { partIndex: 3, position: 'left' } },
+                        { from: { partIndex: 3, position: 'right' }, to: { partIndex: 0, position: 'left' } }
+                    ]
+                }
+            },
+            {
+                level: 5,
+                task: "ボタンでランプ1を点灯、同時にランプ2を消灯させてください",
+                checkWin: () => {
+                    const lamp1 = droppedParts.filter(p => p.type === 'lamp')[0];
+                    const lamp2 = droppedParts.filter(p => p.type === 'lamp')[1];
+                    const button = droppedParts.find(p => p.type === 'button');
+                    const relay = droppedParts.find(p => p.type === 'relay');
+                    return lamp1 && lamp2 && button && relay && button.pressed && 
+                           lamp1.powered && !lamp2.powered;
+                },
+                example: {
+                    parts: [
+                        { type: 'battery', x: 100, y: 200, voltage: '24' },
+                        { type: 'button', x: 250, y: 150 },
+                        { type: 'relay', x: 400, y: 200, voltage: '24' },
+                        { type: 'lamp', x: 600, y: 150 },
+                        { type: 'lamp', x: 600, y: 250 }
+                    ],
+                    connections: [
+                        { from: { partIndex: 0, position: 'right' }, to: { partIndex: 1, position: 'left' } },
+                        { from: { partIndex: 1, position: 'right' }, to: { partIndex: 2, position: 'coil-plus' } },
+                        { from: { partIndex: 2, position: 'coil-minus' }, to: { partIndex: 0, position: 'bottom' } },
+                        { from: { partIndex: 0, position: 'top' }, to: { partIndex: 2, position: 'c-contact' } },
+                        { from: { partIndex: 2, position: 'a-contact' }, to: { partIndex: 3, position: 'left' } },
+                        { from: { partIndex: 3, position: 'right' }, to: { partIndex: 0, position: 'left' } },
+                        { from: { partIndex: 2, position: 'b-contact' }, to: { partIndex: 4, position: 'left' } },
+                        { from: { partIndex: 4, position: 'right' }, to: { partIndex: 0, position: 'left' } }
+                    ]
+                }
+            }
+        ];
+        
+        // ドラッグ&ドロップの実装
+        document.querySelectorAll('.part-item').forEach(item => {
+            item.addEventListener('dragstart', handleDragStart);
+            item.addEventListener('dragend', handleDragEnd);
+        });
+        
+        const workspace = document.getElementById('workspace');
+        workspace.addEventListener('dragover', handleDragOver);
+        workspace.addEventListener('drop', handleDrop);
+        
+        function handleDragStart(e) {
+            draggedElement = e.target;
+            e.target.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'copy';
+        }
+        
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+        }
+        
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            if (!draggedElement) return;
+            
+            const rect = workspace.getBoundingClientRect();
+            const x = e.clientX - rect.left - 40;
+            const y = e.clientY - rect.top - 40;
+            
+            const partType = draggedElement.getAttribute('data-type');
+            createPart(partType, x, y);
+        }
+        
+        function createPart(type, x, y, settings = {}) {
+            const part = document.createElement('div');
+            part.className = 'dropped-part';
+            if (type === 'relay') {
+                part.classList.add('relay');
+            } else if (type === 'timer') {
+                part.classList.add('timer');
+            }
+            part.style.left = x + 'px';
+            part.style.top = y + 'px';
+            part.innerHTML = partSvgs[type];
+            
+            const partData = {
+                id: Date.now() + Math.random(),
+                type: type,
+                element: part,
+                x: x,
+                y: y,
+                connections: [],
+                powered: false,
+                on: false,
+                pressed: false,
+                relayActive: false,
+                voltage: settings.voltage || '24',
+                timerType: settings.timerType || 'on-delay',
+                delay: settings.delay || 3,
+                timerStartTime: null,
+                outputActive: false,
+                sensorActive: false
+            };
+            
+            // 電圧設定の初期化
+            if (settings.voltage) {
+                const selector = part.querySelector('.voltage-selector');
+                if (selector) {
+                    selector.value = settings.voltage;
+                }
+            }
+            
+            // タイマー設定の初期化
+            if (type === 'timer' && settings.timerType && settings.delay) {
+                const selector = part.querySelector('.voltage-selector');
+                if (selector) {
+                    selector.value = `${settings.timerType}-${settings.delay}`;
+                }
+                const display = part.querySelector('.timer-display');
+                if (display) {
+                    display.textContent = `${settings.delay}秒`;
+                }
+            }
+            
+            // 接続点を追加
+            if (type === 'relay') {
+                const points = [
+                    { class: 'coil-plus', label: 'コイル+' },
+                    { class: 'coil-minus', label: 'コイル-' },
+                    { class: 'a-contact', label: 'a接点' },
+                    { class: 'b-contact', label: 'b接点' },
+                    { class: 'c-contact', label: 'c接点' }
+                ];
+                points.forEach(pt => {
+                    const point = document.createElement('div');
+                    point.className = `connection-point ${pt.class}`;
+                    point.title = pt.label;
+                    
+                    // マウスダウンでドラッグ開始
+                    point.addEventListener('mousedown', (e) => {
+                        // 既に接続されている場合は、クリックで削除の可能性をチェック
+                        const existingConn = connections.find(c => 
+                            (c.from.part === partData && c.from.position === pt.class) ||
+                            (c.to.part === partData && c.to.position === pt.class)
+                        );
+                        
+                        if (existingConn) {
+                            // 短いクリックで削除、長押しで新しい接続
+                            let isClick = true;
+                            const startTime = Date.now();
+                            
+                            const checkClick = (e) => {
+                                if (Date.now() - startTime > 200) {
+                                    isClick = false;
+                                }
+                            };
+                            
+                            const handleUp = (e) => {
+                                if (isClick && Date.now() - startTime < 200) {
+                                    // 短いクリックなので接続を削除
+                                    removeConnection(existingConn);
+                                } else {
+                                    // ドラッグ処理は既に開始されている
+                                }
+                                document.removeEventListener('mousemove', checkClick);
+                                document.removeEventListener('mouseup', handleUp);
+                            };
+                            
+                            document.addEventListener('mousemove', checkClick);
+                            document.addEventListener('mouseup', handleUp);
+                        }
+                        
+                        handleConnectionClick(e, partData, pt.class);
+                    });
+                    
+                    part.appendChild(point);
+                });
+            } else if (type === 'timer') {
+                const points = [
+                    { class: 'input-plus', label: '入力+' },
+                    { class: 'input-minus', label: '入力-' },
+                    { class: 'output-plus', label: '出力+' },
+                    { class: 'output-minus', label: '出力-' }
+                ];
+                points.forEach(pt => {
+                    const point = document.createElement('div');
+                    point.className = `connection-point ${pt.class}`;
+                    point.title = pt.label;
+                    
+                    point.addEventListener('mousedown', (e) => {
+                        const existingConn = connections.find(c => 
+                            (c.from.part === partData && c.from.position === pt.class) ||
+                            (c.to.part === partData && c.to.position === pt.class)
+                        );
+                        
+                        if (existingConn) {
+                            let isClick = true;
+                            const startTime = Date.now();
+                            
+                            const checkClick = (e) => {
+                                if (Date.now() - startTime > 200) {
+                                    isClick = false;
+                                }
+                            };
+                            
+                            const handleUp = (e) => {
+                                if (isClick && Date.now() - startTime < 200) {
+                                    removeConnection(existingConn);
+                                }
+                                document.removeEventListener('mousemove', checkClick);
+                                document.removeEventListener('mouseup', handleUp);
+                            };
+                            
+                            document.addEventListener('mousemove', checkClick);
+                            document.addEventListener('mouseup', handleUp);
+                        }
+                        
+                        handleConnectionClick(e, partData, pt.class);
+                    });
+                    
+                    part.appendChild(point);
+                });
+            } else if (type === 'sensor') {
+                const points = [
+                    { class: 'power-plus', label: '電源+' },
+                    { class: 'power-minus', label: '電源-' },
+                    { class: 'sensor-out-plus', label: '出力+' },
+                    { class: 'sensor-out-minus', label: '出力-' }
+                ];
+                points.forEach(pt => {
+                    const point = document.createElement('div');
+                    point.className = `connection-point ${pt.class}`;
+                    point.title = pt.label;
+                    
+                    point.addEventListener('mousedown', (e) => {
+                        const existingConn = connections.find(c => 
+                            (c.from.part === partData && c.from.position === pt.class) ||
+                            (c.to.part === partData && c.to.position === pt.class)
+                        );
+                        
+                        if (existingConn) {
+                            let isClick = true;
+                            const startTime = Date.now();
+                            
+                            const checkClick = (e) => {
+                                if (Date.now() - startTime > 200) {
+                                    isClick = false;
+                                }
+                            };
+                            
+                            const handleUp = (e) => {
+                                if (isClick && Date.now() - startTime < 200) {
+                                    removeConnection(existingConn);
+                                }
+                                document.removeEventListener('mousemove', checkClick);
+                                document.removeEventListener('mouseup', handleUp);
+                            };
+                            
+                            document.addEventListener('mousemove', checkClick);
+                            document.addEventListener('mouseup', handleUp);
+                        }
+                        
+                        handleConnectionClick(e, partData, pt.class);
+                    });
+                    
+                    part.appendChild(point);
+                });
+            } else {
+                ['top', 'bottom', 'left', 'right'].forEach(pos => {
+                    const point = document.createElement('div');
+                    point.className = `connection-point ${pos}`;
+                    
+                    point.addEventListener('mousedown', (e) => {
+                        const existingConn = connections.find(c => 
+                            (c.from.part === partData && c.from.position === pos) ||
+                            (c.to.part === partData && c.to.position === pos)
+                        );
+                        
+                        if (existingConn) {
+                            let isClick = true;
+                            const startTime = Date.now();
+                            
+                            const checkClick = (e) => {
+                                if (Date.now() - startTime > 200) {
+                                    isClick = false;
+                                }
+                            };
+                            
+                            const handleUp = (e) => {
+                                if (isClick && Date.now() - startTime < 200) {
+                                    removeConnection(existingConn);
+                                }
+                                document.removeEventListener('mousemove', checkClick);
+                                document.removeEventListener('mouseup', handleUp);
+                            };
+                            
+                            document.addEventListener('mousemove', checkClick);
+                            document.addEventListener('mouseup', handleUp);
+                        }
+                        
+                        handleConnectionClick(e, partData, pos);
+                    });
+                    
+                    part.appendChild(point);
+                });
+            }
+            
+            // パーツ固有の動作
+            if (type === 'switch') {
+                // スイッチの初期状態を設定
+                updateSwitchVisual(part, partData.on);
+                
+                part.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('connection-point')) return;
+                    if (e.target.tagName === 'SELECT') return;
+                    
+                    partData.on = !partData.on;
+                    updateSwitchVisual(part, partData.on);
+                    simulateCircuit();
+                });
+            } else if (type === 'button') {
+                part.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('connection-point')) return;
+                    if (e.target.tagName === 'SELECT') return;
+                    
+                    partData.pressed = true;
+                    part.style.transform = 'scale(0.9)';
+                    simulateCircuit();
+                });
+                
+                part.addEventListener('mouseup', () => {
+                    partData.pressed = false;
+                    part.style.transform = 'scale(1)';
+                    simulateCircuit();
+                });
+                
+                part.addEventListener('mouseleave', () => {
+                    partData.pressed = false;
+                    part.style.transform = 'scale(1)';
+                    simulateCircuit();
+                });
+            }
+            
+            if (type === 'sensor') {
+                part.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('connection-point')) return;
+                    if (e.target.tagName === 'SELECT') return;
+                    
+                    partData.sensorActive = !partData.sensorActive;
+                    if (partData.sensorActive) {
+                        part.classList.add('sensor-active');
+                    } else {
+                        part.classList.remove('sensor-active');
+                    }
+                    simulateCircuit();
+                });
+            }
+            
+            // ダブルクリックで削除
+            part.addEventListener('dblclick', (e) => {
+                if (e.target.classList.contains('connection-point')) return;
+                if (e.target.tagName === 'SELECT') return;
+                
+                removePart(partData);
+            });
+            
+            // ドラッグ機能
+            let isDragging = false;
+            part.addEventListener('mousedown', (e) => {
+                if (e.target.classList.contains('connection-point')) return;
+                if (e.target.tagName === 'SELECT') return;
+                if (partData.type === 'button') return;
+                
+                isDragging = false;
+                const startX = e.clientX - partData.x;
+                const startY = e.clientY - partData.y;
+                const startMouseX = e.clientX;
+                const startMouseY = e.clientY;
+                
+                function handleMouseMove(e) {
+                    if (!isDragging) {
+                        const distance = Math.sqrt(
+                            Math.pow(e.clientX - startMouseX, 2) + 
+                            Math.pow(e.clientY - startMouseY, 2)
+                        );
+                        if (distance > 5) {
+                            isDragging = true;
+                        } else {
+                            return;
+                        }
+                    }
+                    
+                    partData.x = e.clientX - startX;
+                    partData.y = e.clientY - startY;
+                    part.style.left = partData.x + 'px';
+                    part.style.top = partData.y + 'px';
+                    updateWires();
+                }
+                
+                function handleMouseUp() {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                    
+                    // ドラッグしていない場合はクリックイベントで処理するので、ここでは何もしない
+                }
+                
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+            });
+            
+            workspace.appendChild(part);
+            droppedParts.push(partData);
+            
+            // 電圧セレクターのイベントリスナーを設定
+            const voltageSelector = part.querySelector('.voltage-selector');
+            if (voltageSelector) {
+                voltageSelector.partData = partData;
+            }
+            
+            // 初期配置時はシミュレーションを実行しない（模範解答表示時のため）
+            if (!settings.skipInitialSimulation) {
+                // 配線がある場合のみシミュレーション実行
+                if (connections.length > 0) {
+                    simulateCircuit();
+                }
+            }
+            
+            return partData;
+        }
+        
+        function removePart(partData) {
+            // 接続を削除
+            const connectionsToRemove = [...partData.connections];
+            connectionsToRemove.forEach(conn => {
+                removeConnection(conn);
+            });
+            
+            // パーツを削除
+            partData.element.remove();
+            const index = droppedParts.indexOf(partData);
+            if (index > -1) {
+                droppedParts.splice(index, 1);
+            }
+            
+            simulateCircuit();
+        }
+        
+        function updateVoltage(selector) {
+            const partData = selector.partData;
+            if (partData) {
+                partData.voltage = selector.value;
+            }
+        }
+        
+        function updateTimerSettings(selector) {
+            const partData = selector.partData;
+            if (partData) {
+                const [type, delay] = selector.value.split('-delay-');
+                partData.timerType = type + '-delay';
+                partData.delay = parseInt(delay);
+                
+                const display = partData.element.querySelector('.timer-display');
+                if (display) {
+                    display.textContent = `${delay}秒`;
+                }
+            }
+        }
+        
+        function handleConnectionClick(e, part, position) {
+            e.stopPropagation();
+            
+            // マウスダウン：ドラッグ開始
+            isDraggingWire = true;
+            dragStartPoint = { part, position };
+            e.target.classList.add('selected');
+            
+            const svg = document.getElementById('wireSvg');
+            const startPos = getConnectionPointPosition(part, position);
+            
+            // ドラッグ中の仮の線を作成
+            dragWire = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            dragWire.setAttribute('class', 'wire-path');
+            dragWire.setAttribute('stroke-dasharray', '5,5');
+            dragWire.setAttribute('d', `M ${startPos.x} ${startPos.y} L ${startPos.x} ${startPos.y}`);
+            svg.appendChild(dragWire);
+            
+            // マウス移動イベント
+            function handleMouseMove(e) {
+                if (!isDraggingWire || !dragWire) return;
+                
+                const rect = workspace.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                dragWire.setAttribute('d', `M ${startPos.x} ${startPos.y} L ${x} ${y}`);
+            }
+            
+            // マウスアップイベント
+            function handleMouseUp(e) {
+                if (!isDraggingWire) return;
+                
+                // 接続点上でマウスアップしたかチェック
+                const element = document.elementFromPoint(e.clientX, e.clientY);
+                if (element && element.classList.contains('connection-point')) {
+                    // 接続先のパーツと位置を取得
+                    const endPart = getPartFromConnectionPoint(element);
+                    const endPosition = getPositionFromConnectionPoint(element);
+                    
+                    if (endPart && endPart !== dragStartPoint.part) {
+                        // 接続を作成
+                        createConnection(dragStartPoint, { part: endPart, position: endPosition });
+                    }
+                }
+                
+                // クリーンアップ
+                if (dragWire) {
+                    dragWire.remove();
+                    dragWire = null;
+                }
+                
+                document.querySelectorAll('.connection-point').forEach(p => {
+                    p.classList.remove('selected');
+                });
+                
+                isDraggingWire = false;
+                dragStartPoint = null;
+                
+                workspace.removeEventListener('mousemove', handleMouseMove);
+                workspace.removeEventListener('mouseup', handleMouseUp);
+                workspace.removeEventListener('mouseleave', handleMouseLeave);
+            }
+            
+            // マウスがワークスペースから出た場合
+            function handleMouseLeave() {
+                handleMouseUp(e);
+            }
+            
+            workspace.addEventListener('mousemove', handleMouseMove);
+            workspace.addEventListener('mouseup', handleMouseUp);
+            workspace.addEventListener('mouseleave', handleMouseLeave);
+        }
+        
+        // 接続点から対応するパーツを取得
+        function getPartFromConnectionPoint(element) {
+            const partElement = element.closest('.dropped-part');
+            if (partElement) {
+                return droppedParts.find(p => p.element === partElement);
+            }
+            return null;
+        }
+        
+        // 接続点から位置を取得
+        function getPositionFromConnectionPoint(element) {
+            const classes = element.className.split(' ');
+            for (const cls of classes) {
+                if (cls !== 'connection-point' && cls !== 'connected' && cls !== 'selected') {
+                    return cls;
+                }
+            }
+            return null;
+        }
+        
+        function createConnection(from, to) {
+            const connection = {
+                from: from,
+                to: to,
+                wire: null
+            };
+            
+            connections.push(connection);
+            from.part.connections.push(connection);
+            to.part.connections.push(connection);
+            
+            drawWire(connection);
+            
+            const fromPoint = from.part.element.querySelector(`.connection-point.${from.position}`);
+            const toPoint = to.part.element.querySelector(`.connection-point.${to.position}`);
+            if (fromPoint) fromPoint.classList.add('connected');
+            if (toPoint) toPoint.classList.add('connected');
+            
+            simulateCircuit();
+        }
+        
+        function drawWire(connection) {
+            const svg = document.getElementById('wireSvg');
+            const from = getConnectionPointPosition(connection.from.part, connection.from.position);
+            const to = getConnectionPointPosition(connection.to.part, connection.to.position);
+            
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const d = `M ${from.x} ${from.y} Q ${(from.x + to.x) / 2} ${(from.y + to.y) / 2} ${to.x} ${to.y}`;
+            path.setAttribute('d', d);
+            path.setAttribute('class', 'wire-path');
+            
+            path.addEventListener('click', () => removeConnection(connection));
+            
+            svg.appendChild(path);
+            connection.wire = path;
+        }
+        
+        function removeConnection(connection) {
+            const index = connections.indexOf(connection);
+            if (index > -1) {
+                connections.splice(index, 1);
+            }
+            
+            const fromIndex = connection.from.part.connections.indexOf(connection);
+            if (fromIndex > -1) {
+                connection.from.part.connections.splice(fromIndex, 1);
+            }
+            
+            const toIndex = connection.to.part.connections.indexOf(connection);
+            if (toIndex > -1) {
+                connection.to.part.connections.splice(toIndex, 1);
+            }
+            
+            const fromPoint = connection.from.part.element.querySelector(`.connection-point.${connection.from.position}`);
+            const toPoint = connection.to.part.element.querySelector(`.connection-point.${connection.to.position}`);
+            
+            if (fromPoint) fromPoint.classList.remove('connected');
+            if (toPoint) toPoint.classList.remove('connected');
+            
+            if (connection.wire) {
+                connection.wire.remove();
+            }
+            
+            simulateCircuit();
+        }
+        
+        function getConnectionPointPosition(part, position) {
+            const rect = part.element.getBoundingClientRect();
+            const workspaceRect = workspace.getBoundingClientRect();
+            
+            let x = rect.left - workspaceRect.left + rect.width / 2;
+            let y = rect.top - workspaceRect.top + rect.height / 2;
+            
+            if (part.type === 'relay') {
+                const width = rect.width;
+                const height = rect.height;
+                switch (position) {
+                    case 'coil-plus':
+                        x = rect.left - workspaceRect.left + width * 0.2;
+                        y = rect.top - workspaceRect.top;
+                        break;
+                    case 'coil-minus':
+                        x = rect.left - workspaceRect.left + width * 0.2;
+                        y = rect.bottom - workspaceRect.top;
+                        break;
+                    case 'a-contact':
+                        x = rect.left - workspaceRect.left + width * 0.8;
+                        y = rect.top - workspaceRect.top;
+                        break;
+                    case 'b-contact':
+                        x = rect.left - workspaceRect.left + width * 0.8;
+                        y = rect.bottom - workspaceRect.top;
+                        break;
+                    case 'c-contact':
+                        x = rect.right - workspaceRect.left;
+                        y = rect.top - workspaceRect.top + height / 2;
+                        break;
+                }
+            } else if (part.type === 'timer') {
+                const width = rect.width;
+                const height = rect.height;
+                switch (position) {
+                    case 'input-plus':
+                        x = rect.left - workspaceRect.left + width * 0.25;
+                        y = rect.top - workspaceRect.top;
+                        break;
+                    case 'input-minus':
+                        x = rect.left - workspaceRect.left + width * 0.25;
+                        y = rect.bottom - workspaceRect.top;
+                        break;
+                    case 'output-plus':
+                        x = rect.left - workspaceRect.left + width * 0.75;
+                        y = rect.top - workspaceRect.top;
+                        break;
+                    case 'output-minus':
+                        x = rect.left - workspaceRect.left + width * 0.75;
+                        y = rect.bottom - workspaceRect.top;
+                        break;
+                }
+            } else if (part.type === 'sensor') {
+                const width = rect.width;
+                switch (position) {
+                    case 'power-plus':
+                        x = rect.left - workspaceRect.left + width * 0.25;
+                        y = rect.top - workspaceRect.top;
+                        break;
+                    case 'power-minus':
+                        x = rect.left - workspaceRect.left + width * 0.25;
+                        y = rect.bottom - workspaceRect.top;
+                        break;
+                    case 'sensor-out-plus':
+                        x = rect.left - workspaceRect.left + width * 0.75;
+                        y = rect.top - workspaceRect.top;
+                        break;
+                    case 'sensor-out-minus':
+                        x = rect.left - workspaceRect.left + width * 0.75;
+                        y = rect.bottom - workspaceRect.top;
+                        break;
+                }
+            } else {
+                switch (position) {
+                    case 'top':
+                        y -= rect.height / 2;
+                        break;
+                    case 'bottom':
+                        y += rect.height / 2;
+                        break;
+                    case 'left':
+                        x -= rect.width / 2;
+                        break;
+                    case 'right':
+                        x += rect.width / 2;
+                        break;
+                }
+            }
+            
+            return { x, y };
+        }
+        
+        function updateWires() {
+            connections.forEach(conn => {
+                const from = getConnectionPointPosition(conn.from.part, conn.from.position);
+                const to = getConnectionPointPosition(conn.to.part, conn.to.position);
+                const d = `M ${from.x} ${from.y} Q ${(from.x + to.x) / 2} ${(from.y + to.y) / 2} ${to.x} ${to.y}`;
+                conn.wire.setAttribute('d', d);
+            });
+        }
+        
+        function updateSwitchVisual(element, isOn) {
+            const lever = element.querySelector('.switch-lever');
+            if (lever) {
+                if (isOn) {
+                    lever.setAttribute('x2', '40');
+                    lever.setAttribute('y2', '30');
+                } else {
+                    lever.setAttribute('x2', '40');
+                    lever.setAttribute('y2', '20');
+                }
+            }
+        }
+        
+        function updateRelayVisual(element, isActive) {
+            const contact = element.querySelector('.relay-contact');
+            if (contact) {
+                if (isActive) {
+                    contact.setAttribute('x2', '80');
+                    contact.setAttribute('y2', '30');
+                } else {
+                    contact.setAttribute('x2', '80');
+                    contact.setAttribute('y2', '70');
+                }
+            }
+        }
+        
+        function simulateCircuit() {
+            // 電流アニメーションをクリア
+            clearCurrentAnimations();
+            
+            // すべてのパーツと配線の電源状態をリセット
+            droppedParts.forEach(part => {
+                part.powered = false;
+                part.visited = false;
+                part.hasValidPath = false;
+                if (part.type === 'relay') {
+                    part.relayActive = false;
+                }
+            });
+            
+            connections.forEach(conn => {
+                conn.powered = false;
+            });
+            
+            // 電池を見つける
+            const batteries = droppedParts.filter(p => p.type === 'battery');
+            
+            if (batteries.length === 0) {
+                updateVisuals();
+                return;
+            }
+            
+            // 各電池について、有効な閉回路があるかチェック
+            batteries.forEach(battery => {
+                battery.powered = true;
+                
+                // 電池から始まる閉回路を探す
+                findClosedCircuits(battery);
+            });
+            
+            // リレーとタイマーの状態を更新
+            updateRelays();
+            updateTimers();
+            
+            // リレーの状態変化後、再度回路をチェック
+            if (hasRelaysOrTimers()) {
+                // 電池以外のパーツの電源状態をリセット（hasValidPathは保持）
+                droppedParts.forEach(part => {
+                    if (part.type !== 'battery') {
+                        part.powered = false;
+                        part.visited = false;
+                    }
+                });
+                
+                // 接続の電源状態もリセット
+                connections.forEach(conn => {
+                    conn.powered = false;
+                });
+                
+                // 再度閉回路を探す
+                batteries.forEach(battery => {
+                    findClosedCircuits(battery);
+                });
+            }
+            
+            updateVisuals();
+            animateCurrentFlow();
+        }
+        
+        // 電池から始まる閉回路を探す
+        function findClosedCircuits(battery) {
+            // 電池の各接続点から探索開始
+            battery.connections.forEach(startConn => {
+                const startPart = startConn.from.part === battery ? startConn.to.part : startConn.from.part;
+                
+                // DFSで電池に戻る経路を探す
+                const visited = new Set();
+                visited.add(battery);
+                
+                if (findPathToBattery(startPart, battery, visited, [battery, startPart])) {
+                    // 有効な閉回路が見つかったら、その経路に電流を流す
+                    markCircuitAsPowered(battery, startPart, new Set([battery]));
+                }
+            });
+        }
+        
+        // 指定されたパーツから電池に戻る経路があるか探す
+        function findPathToBattery(currentPart, targetBattery, visited, path) {
+            if (!currentPart || visited.has(currentPart)) {
+                return false;
+            }
+            
+            // スイッチ・ボタンの状態チェック
+            if (currentPart.type === 'switch' && !currentPart.on) {
+                return false;
+            }
+            if (currentPart.type === 'button' && !currentPart.pressed) {
+                return false;
+            }
+            
+            visited.add(currentPart);
+            
+            // 現在のパーツの接続を確認
+            for (const conn of currentPart.connections) {
+                const nextPart = conn.from.part === currentPart ? conn.to.part : conn.from.part;
+                
+                // 電池に戻った場合
+                if (nextPart === targetBattery && path.length > 2) {
+                    // リレー・タイマー・センサーの接続チェック
+                    if (currentPart.type === 'relay' || nextPart.type === 'relay') {
+                        if (!checkRelayConnection(currentPart, nextPart)) continue;
+                    }
+                    if (currentPart.type === 'timer' || nextPart.type === 'timer') {
+                        if (!checkTimerConnection(currentPart, nextPart)) continue;
+                    }
+                    if (currentPart.type === 'sensor' || nextPart.type === 'sensor') {
+                        if (!checkSensorConnection(currentPart, nextPart)) continue;
+                    }
+                    return true;
+                }
+                
+                // まだ訪問していないパーツの場合、再帰的に探索
+                if (!visited.has(nextPart)) {
+                    // 次のパーツへの接続が有効かチェック
+                    if (currentPart.type === 'relay' || nextPart.type === 'relay') {
+                        if (!checkRelayConnection(currentPart, nextPart)) continue;
+                    }
+                    if (currentPart.type === 'timer' || nextPart.type === 'timer') {
+                        if (!checkTimerConnection(currentPart, nextPart)) continue;
+                    }
+                    if (currentPart.type === 'sensor' || nextPart.type === 'sensor') {
+                        if (!checkSensorConnection(currentPart, nextPart)) continue;
+                    }
+                    
+                    const newPath = [...path, nextPart];
+                    if (findPathToBattery(nextPart, targetBattery, visited, newPath)) {
+                        return true;
+                    }
+                }
+            }
+            
+            visited.delete(currentPart);
+            return false;
+        }
+        
+        // 閉回路に電流を流す
+        function markCircuitAsPowered(fromPart, toPart, visited) {
+            if (visited.has(toPart)) {
+                return;
+            }
+            
+            // スイッチ・ボタンの状態を再確認
+            if (toPart.type === 'switch' && !toPart.on) {
+                return;
+            }
+            if (toPart.type === 'button' && !toPart.pressed) {
+                return;
+            }
+            
+            visited.add(toPart);
+            toPart.powered = true;
+            toPart.hasValidPath = true;
+            
+            // 接続に電流を流す
+            const connection = connections.find(conn => 
+                (conn.from.part === fromPart && conn.to.part === toPart) ||
+                (conn.to.part === fromPart && conn.from.part === toPart)
+            );
+            if (connection) {
+                connection.powered = true;
+            }
+            
+            // 次のパーツへ
+            toPart.connections.forEach(conn => {
+                const nextPart = conn.from.part === toPart ? conn.to.part : conn.from.part;
+                
+                // 特殊パーツの接続チェック
+                let canConnect = true;
+                if (toPart.type === 'relay' || nextPart.type === 'relay') {
+                    canConnect = checkRelayConnection(toPart, nextPart);
+                } else if (toPart.type === 'timer' || nextPart.type === 'timer') {
+                    canConnect = checkTimerConnection(toPart, nextPart);
+                } else if (toPart.type === 'sensor' || nextPart.type === 'sensor') {
+                    canConnect = checkSensorConnection(toPart, nextPart);
+                }
+                
+                if (canConnect && !visited.has(nextPart)) {
+                    markCircuitAsPowered(toPart, nextPart, visited);
+                }
+            });
+        }
+        
+        function checkRelayConnection(fromPart, toPart) {
+            const conn = connections.find(c => 
+                (c.from.part === fromPart && c.to.part === toPart) ||
+                (c.to.part === fromPart && c.from.part === toPart)
+            );
+            
+            if (!conn) return true;
+            
+            if (fromPart.type === 'relay') {
+                const fromPos = conn.from.part === fromPart ? conn.from.position : conn.to.position;
+                
+                if (fromPos === 'coil-plus' || fromPos === 'coil-minus') {
+                    return true;
+                }
+                
+                if (fromPos === 'c-contact') {
+                    const toPos = conn.from.part === fromPart ? conn.to.position : conn.from.position;
+                    if (fromPart.relayActive && toPos === 'a-contact') return true;
+                    if (!fromPart.relayActive && toPos === 'b-contact') return true;
+                    
+                    // 他のパーツへの接続
+                    if (toPart.type !== 'relay') {
+                        return true;
+                    }
+                }
+                
+                if (fromPos === 'a-contact') {
+                    return fromPart.relayActive;
+                }
+                
+                if (fromPos === 'b-contact') {
+                    return !fromPart.relayActive;
+                }
+            }
+            
+            if (toPart.type === 'relay') {
+                const toPos = conn.from.part === fromPart ? conn.to.position : conn.from.position;
+                
+                if (toPos === 'coil-plus' || toPos === 'coil-minus') {
+                    return true;
+                }
+                
+                if (toPos === 'c-contact') {
+                    const fromPos = conn.from.part === fromPart ? conn.from.position : conn.to.position;
+                    if (toPart.relayActive && fromPos === 'a-contact') return true;
+                    if (!toPart.relayActive && fromPos === 'b-contact') return true;
+                    
+                    // 他のパーツからの接続
+                    if (fromPart.type !== 'relay') {
+                        return true;
+                    }
+                }
+                
+                if (toPos === 'a-contact') {
+                    return toPart.relayActive;
+                }
+                
+                if (toPos === 'b-contact') {
+                    return !toPart.relayActive;
+                }
+            }
+            
+            return true;
+        }
+        
+        function checkTimerConnection(fromPart, toPart) {
+            const conn = connections.find(c => 
+                (c.from.part === fromPart && c.to.part === toPart) ||
+                (c.to.part === fromPart && c.from.part === toPart)
+            );
+            
+            if (!conn) return true;
+            
+            if (fromPart.type === 'timer') {
+                const fromPos = conn.from.part === fromPart ? conn.from.position : conn.to.position;
+                
+                if (fromPos === 'input-plus' || fromPos === 'input-minus') {
+                    return true;
+                }
+                
+                if (fromPos === 'output-plus' || fromPos === 'output-minus') {
+                    return fromPart.outputActive;
+                }
+            }
+            
+            if (toPart.type === 'timer') {
+                const toPos = conn.from.part === fromPart ? conn.to.position : conn.from.position;
+                
+                if (toPos === 'input-plus' || toPos === 'input-minus') {
+                    return true;
+                }
+                
+                if (toPos === 'output-plus' || toPos === 'output-minus') {
+                    return toPart.outputActive;
+                }
+            }
+            
+            return true;
+        }
+        
+        function checkSensorConnection(fromPart, toPart) {
+            const conn = connections.find(c => 
+                (c.from.part === fromPart && c.to.part === toPart) ||
+                (c.to.part === fromPart && c.from.part === toPart)
+            );
+            
+            if (!conn) return true;
+            
+            if (fromPart.type === 'sensor') {
+                const fromPos = conn.from.part === fromPart ? conn.from.position : conn.to.position;
+                
+                if (fromPos === 'power-plus' || fromPos === 'power-minus') {
+                    return true;
+                }
+                
+                if (fromPos === 'sensor-out-plus' || fromPos === 'sensor-out-minus') {
+                    return fromPart.sensorActive && fromPart.powered;
+                }
+            }
+            
+            if (toPart.type === 'sensor') {
+                const toPos = conn.from.part === fromPart ? conn.to.position : conn.from.position;
+                
+                if (toPos === 'power-plus' || toPos === 'power-minus') {
+                    return true;
+                }
+                
+                if (toPos === 'sensor-out-plus' || toPos === 'sensor-out-minus') {
+                    return toPart.sensorActive && toPart.powered;
+                }
+            }
+            
+            return true;
+        }
+        
+        function updateRelays() {
+            droppedParts.filter(p => p.type === 'relay').forEach(relay => {
+                let coilPowered = false;
+                
+                const coilConnections = relay.connections.filter(conn => {
+                    const relayPos = conn.from.part === relay ? conn.from.position : conn.to.position;
+                    return relayPos === 'coil-plus' || relayPos === 'coil-minus';
+                });
+                
+                if (coilConnections.length >= 2) {
+                    const powered = coilConnections.filter(conn => {
+                        const other = conn.from.part === relay ? conn.to.part : conn.from.part;
+                        return other.powered;
+                    });
+                    
+                    if (powered.length >= 2) {
+                        coilPowered = true;
+                    }
+                }
+                
+                relay.relayActive = coilPowered;
+                updateRelayVisual(relay.element, relay.relayActive);
+            });
+        }
+        
+        function updateTimers() {
+            droppedParts.filter(p => p.type === 'timer').forEach(timer => {
+                const inputConnections = timer.connections.filter(conn => {
+                    const timerPos = conn.from.part === timer ? conn.from.position : conn.to.position;
+                    return timerPos === 'input-plus' || timerPos === 'input-minus';
+                });
+                
+                const inputPowered = inputConnections.length >= 2 && 
+                    inputConnections.every(conn => {
+                        const other = conn.from.part === timer ? conn.to.part : conn.from.part;
+                        return other.powered;
+                    });
+                
+                if (timer.timerType === 'on-delay') {
+                    if (inputPowered && !timer.timerStartTime) {
+                        timer.timerStartTime = Date.now();
+                    } else if (!inputPowered) {
+                        timer.timerStartTime = null;
+                        timer.outputActive = false;
+                    }
+                    
+                    if (timer.timerStartTime) {
+                        const elapsed = (Date.now() - timer.timerStartTime) / 1000;
+                        timer.outputActive = elapsed >= timer.delay;
+                    }
+                } else if (timer.timerType === 'off-delay') {
+                    if (inputPowered) {
+                        timer.outputActive = true;
+                        timer.timerStartTime = null;
+                    } else if (!inputPowered && !timer.timerStartTime) {
+                        timer.timerStartTime = Date.now();
+                    }
+                    
+                    if (timer.timerStartTime && !inputPowered) {
+                        const elapsed = (Date.now() - timer.timerStartTime) / 1000;
+                        if (elapsed >= timer.delay) {
+                            timer.outputActive = false;
+                            timer.timerStartTime = null;
+                        }
+                    }
+                }
+            });
+        }
+        
+        function hasRelaysOrTimers() {
+            return droppedParts.some(p => p.type === 'relay' || p.type === 'timer');
+        }
+        
+        function updateVisuals() {
+            connections.forEach(conn => {
+                if (conn.powered) {
+                    conn.wire.classList.add('powered');
+                } else {
+                    conn.wire.classList.remove('powered');
+                }
+            });
+            
+            droppedParts.forEach(part => {
+                if (part.type === 'lamp') {
+                    if (part.powered) {
+                        part.element.classList.add('lit');
+                    } else {
+                        part.element.classList.remove('lit');
+                    }
+                }
+                
+                if (part.type === 'motor') {
+                    if (part.powered) {
+                        part.element.classList.add('running');
+                    } else {
+                        part.element.classList.remove('running');
+                    }
+                }
+            });
+        }
+        
+        function animateCurrentFlow() {
+            clearCurrentAnimations();
+            
+            const svg = document.getElementById('wireSvg');
+            
+            connections.filter(conn => conn.powered).forEach(conn => {
+                const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                dot.setAttribute('class', 'current-dot');
+                svg.appendChild(dot);
+                
+                const path = conn.wire;
+                const length = path.getTotalLength();
+                
+                const animation = {
+                    dot: dot,
+                    path: path,
+                    length: length,
+                    progress: 0
+                };
+                
+                currentAnimations.push(animation);
+                
+                function animate() {
+                    animation.progress += 2;
+                    if (animation.progress > length) {
+                        animation.progress = 0;
+                    }
+                    
+                    const point = path.getPointAtLength(animation.progress);
+                    dot.setAttribute('cx', point.x);
+                    dot.setAttribute('cy', point.y);
+                    
+                    animation.animationId = requestAnimationFrame(animate);
+                }
+                
+                animate();
+            });
+        }
+        
+        function clearCurrentAnimations() {
+            currentAnimations.forEach(anim => {
+                if (anim.animationId) {
+                    cancelAnimationFrame(anim.animationId);
+                }
+                if (anim.dot) {
+                    anim.dot.remove();
+                }
+            });
+            currentAnimations = [];
+        }
+        
+        function selectLevel(level) {
+            currentLevel = level;
+            loadLevel(level);
+            
+            document.querySelectorAll('.btn-level').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+        
+        function loadLevel(level) {
+            resetWorkspace();
+            const levelData = levels[level - 1];
+            document.getElementById('taskDisplay').textContent = levelData.task;
+        }
+        
+        function checkAnswer() {
+            if (levels[currentLevel - 1].checkWin()) {
+                showMessage('正解です！素晴らしい！', 'success');
+            } else {
+                showMessage('まだ正解ではありません。もう一度試してみましょう。', 'error');
+            }
+            setTimeout(hideMessage, 3000);
+        }
+        
+        function showExample() {
+            if (!confirm('現在の回路をクリアして模範解答を表示しますか？')) {
+                return;
+            }
+            
+            resetWorkspace();
+            
+            const example = levels[currentLevel - 1].example;
+            if (!example) return;
+            
+            const exampleParts = [];
+            example.parts.forEach((partData, index) => {
+                setTimeout(() => {
+                    const part = createPart(partData.type, partData.x, partData.y, partData);
+                    exampleParts.push(part);
+                }, index * 200);
+            });
+            
+            setTimeout(() => {
+                example.connections.forEach((conn, index) => {
+                    setTimeout(() => {
+                        const fromPart = exampleParts[conn.from.partIndex];
+                        const toPart = exampleParts[conn.to.partIndex];
+                        
+                        if (fromPart && toPart) {
+                            createConnection(
+                                { part: fromPart, position: conn.from.position },
+                                { part: toPart, position: conn.to.position }
+                            );
+                        }
+                    }, index * 150);
+                });
+            }, example.parts.length * 200 + 300);
+        }
+        
+        function resetWorkspace() {
+            clearCurrentAnimations();
+            
+            droppedParts.forEach(part => {
+                part.element.remove();
+            });
+            droppedParts = [];
+            
+            connections.forEach(conn => {
+                if (conn.wire) conn.wire.remove();
+            });
+            connections = [];
+            
+            selectedConnection = null;
+        }
+        
+        function showMessage(text, type) {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.textContent = text;
+            messageBox.className = `message ${type}`;
+            messageBox.style.display = 'block';
+        }
+        
+        function hideMessage() {
+            document.getElementById('messageBox').style.display = 'none';
+        }
+        
+        // タイマー更新用のインターバル
+        setInterval(() => {
+            const hasTimers = droppedParts.some(p => p.type === 'timer' && p.timerStartTime);
+            if (hasTimers) {
+                simulateCircuit();
+            }
+        }, 100);
+        
+        // 初期化
+        window.addEventListener('DOMContentLoaded', () => {
+            loadLevel(1);
+        });
+    </script>
+</body>
+</html>
