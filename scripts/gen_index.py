@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 from pathlib import Path
 from datetime import datetime
 
@@ -17,11 +19,33 @@ def title_from_md(p: Path) -> str:
         pass
     return p.stem
 
-mds = sorted(
-    p for p in DOCS.rglob("*.md")
-    if p.name not in EXCLUDE
-)
+def group_key(rel: Path) -> str:
+    # docs直下なら「(root)」扱い、サブフォルダならその最上位フォルダ名
+    parts = rel.parts
+    if len(parts) <= 1:
+        return "(root)"
+    return parts[0]
 
+# 収集
+md_files = []
+for p in DOCS.rglob("*.md"):
+    if p.name in EXCLUDE:
+        continue
+    md_files.append(p)
+
+# グルーピング
+groups: dict[str, list[Path]] = {}
+for p in md_files:
+    rel = p.relative_to(DOCS)
+    k = group_key(rel)
+    groups.setdefault(k, []).append(p)
+
+# ソート（フォルダ名、ファイルパス）
+for k in groups:
+    groups[k].sort(key=lambda p: p.relative_to(DOCS).as_posix().lower())
+sorted_group_names = sorted(groups.keys(), key=lambda s: s.lower())
+
+# 出力
 lines = [
     "# Index",
     "",
@@ -29,9 +53,14 @@ lines = [
     "",
 ]
 
-for p in mds:
-    rel = p.relative_to(DOCS).as_posix()
-    lines.append(f"- [{title_from_md(p)}]({rel})")
+for g in sorted_group_names:
+    lines.append(f"## {g}")
+    lines.append("")
+    for p in groups[g]:
+        rel = p.relative_to(DOCS).as_posix()
+        title = title_from_md(p)
+        lines.append(f"- [{title}]({rel})")
+    lines.append("")
 
-OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+OUT.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 print(f"generated {OUT}")
