@@ -9,14 +9,43 @@ DOCS = ROOT / "docs"
 OUT = DOCS / "index.md"
 
 EXCLUDE = {"index.md", "README.md"}
+INCLUDE_EXTS = {".md", ".html", ".tsx"}
 
 def title_from_md(p: Path) -> str:
     try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            if line.startswith("# "):
-                return line[2:].strip()
+        lines = p.read_text(encoding="utf-8").splitlines()
     except Exception:
-        pass
+        return p.stem
+
+    start_index = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                start_index = i + 1
+                break
+
+    for line in lines[start_index:]:
+        if line.startswith("# "):
+            return line[2:].strip()
+    return p.stem
+
+
+def title_from_html(p: Path) -> str:
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("<title>") and line.endswith("</title>"):
+                return line.removeprefix("<title>").removesuffix("</title>").strip()
+    except Exception:
+        return p.stem
+    return p.stem
+
+
+def title_for_path(p: Path) -> str:
+    if p.suffix == ".md":
+        return title_from_md(p)
+    if p.suffix == ".html":
+        return title_from_html(p)
     return p.stem
 
 def group_key(rel: Path) -> str:
@@ -28,8 +57,10 @@ def group_key(rel: Path) -> str:
 
 # 収集
 md_files = []
-for p in DOCS.rglob("*.md"):
-    if p.name in EXCLUDE:
+for p in DOCS.rglob("*"):
+    if p.suffix not in INCLUDE_EXTS:
+        continue
+    if p.suffix == ".md" and p.name in EXCLUDE:
         continue
     md_files.append(p)
 
@@ -58,7 +89,7 @@ for g in sorted_group_names:
     lines.append("")
     for p in groups[g]:
         rel = p.relative_to(DOCS).as_posix()
-        title = title_from_md(p)
+        title = title_for_path(p)
         lines.append(f"- [{title}]({rel})")
     lines.append("")
 
