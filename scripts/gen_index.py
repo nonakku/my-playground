@@ -12,11 +12,20 @@ EXCLUDE = {"index.md", "README.md"}
 
 def title_from_md(p: Path) -> str:
     try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            if line.startswith("# "):
-                return line[2:].strip()
+        lines = p.read_text(encoding="utf-8").splitlines()
     except Exception:
-        pass
+        return p.stem
+
+    start_index = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                start_index = i + 1
+                break
+
+    for line in lines[start_index:]:
+        if line.startswith("# "):
+            return line[2:].strip()
     return p.stem
 
 def group_key(rel: Path) -> str:
