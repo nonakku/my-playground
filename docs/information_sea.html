@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Information Sea (3D Vector-Flow)</title>
+  <style>
+    html,body{margin:0;height:100%;background:#000;overflow:hidden;}
+    #hud{
+      position:fixed; left:16px; top:16px;
+      padding:10px 12px;
+      color:#8ff;
+      font: 12px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+      background: rgba(0,10,16,0.55);
+      border: 1px solid rgba(0,255,255,0.18);
+      border-radius: 12px;
+      backdrop-filter: blur(6px);
+      max-width: 56vw;
+      pointer-events:none;
+      opacity:0;
+      transition: opacity .12s ease;
+      white-space: pre-wrap;
+    }
+    #hint{
+      position:fixed; right:16px; bottom:16px;
+      color:rgba(160,255,255,0.55);
+      font: 12px system-ui, sans-serif;
+      pointer-events:none;
+      user-select:none;
+    }
+  </style>
+
+  <!-- three.js importmap（CDN） -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+<div id="hud"></div>
+<div id="hint">Mouse: hover to peek • Wheel: zoom • Drag: look</div>
+
+<script type="module">
+import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+
+/* =========================================================
+   PARAM（数値調整はここだけでOK）
+========================================================= */
+const PARAM = {
+  // 情報密度
+  spawnInterval: 0.016,     // 小さいほど増える（0.016=かなり濃い）
+  maxInfos: 820,            // 同時上限
+  trailMax: 80,             // 残像長
+
+  // 見た目
+  fogDensity: 0.030,
+  bloomStrength: 1.05,
+  bloomRadius: 0.78,
+  bloomThreshold: 0.05,
+
+  // 都市
+  canyonHalf: 2.6,          // 通り半幅（狭いほど“谷間の圧”）
+  roadWidth: 10,
+  roadLength: 92,
+
+  // 建物輪郭（太さ）
+  edgeThickness: 0.055,     // 太さ（0.035〜0.08）
+  edgeOpacity: 0.46,        // 濃さ（0.25〜0.65）
+
+  // 速度スケール
+  speedScale: 1.0,
+};
+
+/* =========================================================
+   基本セットアップ
+========================================================= */
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x02070c, PARAM.fogDensity);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x010204, 1);
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 160);
+camera.position.set(0, 1.65, 7.4);
+camera.lookAt(0, 1.55, -10);
+
+const hud = document.getElementById("hud");
+
+/* =========================================================
+   ポストプロセス（ネオンにじみ）
+========================================================= */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight),
+  PARAM.bloomStrength,
+  PARAM.bloomRadius,
+  PARAM.bloomThreshold
+);
+composer.addPass(bloom);
+
+/* =========================================================
+   ライト（シアン寄り）
+========================================================= */
+scene.add(new THREE.AmbientLight(0x1a3440, 0.58));
+
+const key = new THREE.DirectionalLight(0x9ffcff, 0.85);
+key.position.set(-2, 7, 2);
+scene.add(key);
+
+const rim = new THREE.PointLight(0x00ffff, 1.3, 26, 2);
+rim.position.set(0, 2.8, 2.8);
+scene.add(rim);
+
+const farGlow = new THREE.PointLight(0x00ffff, 0.65, 70, 2);
+farGlow.position.set(0, 5.0, -50);
+scene.add(farGlow);
+
+/* =========================================================
+   路面（濡れ）+ 導線
+========================================================= */
+const roadGeo = new THREE.PlaneGeometry(PARAM.roadWidth, PARAM.roadLength, 1, 1);
+const roadMat = new THREE.MeshStandardMaterial({
+  color: 0x020406,
+  metalness: 0.45,
+  roughness: 0.18,
+  emissive: 0x001018,
+  emissiveIntensity: 0.38
+});
+const road = new THREE.Mesh(roadGeo, roadMat);
+road.rotation.x = -Math.PI/2;
+road.position.set(0, 0, -PARAM.roadLength/2 + 6);
+scene.add(road);
+
+const lineGeo = new THREE.PlaneGeometry(0.045, PARAM.roadLength-6);
+const lineMat = new THREE.MeshBasicMaterial({ color:0x00ffff, transparent:true, opacity:0.15 });
+const centerLine = new THREE.Mesh(lineGeo, lineMat);
+centerLine.rotation.x = -Math.PI/2;
+centerLine.position.set(0, 0.01, road.position.z);
+scene.add(centerLine);
+
+/* 路面のキラ粒（反射の粒度） */
+const sparkleCount = 2200;
+const sparkleGeo = new THREE.BufferGeometry();
+const sparklePos = new Float32Array(sparkleCount*3);
+for(let i=0;i<sparkleCount;i++){
+  sparklePos[i*3+0] = (Math.random()-0.5) * (PARAM.canyonHalf*1.85);
+  sparklePos[i*3+1] = 0.02 + Math.random()*0.03;
+  sparklePos[i*3+2] = road.position.z + (Math.random()-0.5)*(PARAM.roadLength-8);
+}
+sparkleGeo.setAttribute("position", new THREE.BufferAttribute(sparklePos,3));
+const sparkleMat = new THREE.PointsMaterial({
+  color: 0x00ffff,
+  size: 0.02,
+  transparent: true,
+  opacity: 0.18,
+  depthWrite: false
+});
+const sparkles = new THREE.Points(sparkleGeo, sparkleMat);
+scene.add(sparkles);
+
+/* =========================================================
+   都市：建物（箱） + 太い輪郭（発光バー）
+   - Lineの線幅は当てにならないので、Meshの細い箱で輪郭を作る
+========================================================= */
+const buildings = [];
+const edgeBars = [];
+
+function clearCity(){
+  for(const b of buildings) scene.remove(b);
+  for(const e of edgeBars) scene.remove(e);
+  buildings.length = 0;
+  edgeBars.length = 0;
+}
+
+const edgeMat = new THREE.MeshBasicMaterial({
+  color: 0x00ffff,
+  transparent: true,
+  opacity: PARAM.edgeOpacity,
+  depthWrite: false
+});
+
+function addEdgeBar(geo, x,y,z){
+  const m = new THREE.Mesh(geo, edgeMat);
+  m.position.set(x,y,z);
+  scene.add(m);
+  edgeBars.push(m);
+  return m;
+}
+
+function makeBuilding(x, z, w, d, h){
+  // 本体
+  const g = new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.MeshStandardMaterial({
+    color: 0x000000,
+    metalness: 0.10,
+    roughness: 0.80,
+    emissive: 0x001018,
+    emissiveIntensity: 0.18
+  });
+  const mesh = new THREE.Mesh(g, m);
+  mesh.position.set(x, h/2, z);
+  scene.add(mesh);
+  buildings.push(mesh);
+
+  // 太い輪郭：縦4本 + 上面4辺（必要十分で“線が太い”に見える）
+  const t = PARAM.edgeThickness;
+  const lift = 0.002; // z-fighting回避
+
+  const barY = new THREE.BoxGeometry(t, h + 0.03, t);
+  const barX = new THREE.BoxGeometry(w + t, t, t);
+  const barZ = new THREE.BoxGeometry(t, t, d + t);
+
+  // 縦エッジ（角）
+  const corners = [
+    [-w/2, -d/2], [-w/2, d/2], [w/2, -d/2], [w/2, d/2]
+  ];
+  for(const [cx, cz] of corners){
+    addEdgeBar(
+      barY,
+      x + cx + (cx>0?lift:-lift),
+      h/2,
+      z + cz + (cz>0?lift:-lift)
+    );
+  }
+
+  // 上面の枠
+  const yTop = h + t*0.5;
+  addEdgeBar(barX, x, yTop, z - d/2);
+  addEdgeBar(barX, x, yTop, z + d/2);
+  addEdgeBar(barZ, x - w/2, yTop, z);
+  addEdgeBar(barZ, x + w/2, yTop, z);
+}
+
+function genCity(){
+  clearCity();
+  const depth = PARAM.roadLength;
+  const step = 2.35;
+  const canyon = PARAM.canyonHalf;
+
+  for (let i=0; i<depth/step; i++){
+    const z = -i*step;
+
+    for(const side of [-1, +1]){
+      // 主塔
+      const w = 1.1 + Math.random()*2.0;
+      const d = 1.2 + Math.random()*2.8;
+      const h = 6.0 + Math.random()*18.0;
+
+      const layer = Math.random();
+      const xBase = side*(canyon + w/2) + side*(0.18 + layer*1.25) + (Math.random()-0.5)*0.38;
+      const zJit  = (Math.random()-0.5)*0.95;
+
+      makeBuilding(xBase, z + zJit, w, d, h);
+
+      // 張り出し
+      if (Math.random() < 0.35){
+        const w2 = 0.8 + Math.random()*1.7;
+        const d2 = 0.9 + Math.random()*2.3;
+        const h2 = 1.0 + Math.random()*4.2;
+        const x2 = side*(canyon + w2/2) + side*(0.05 + Math.random()*0.9);
+        makeBuilding(x2, z + (Math.random()-0.5)*1.5, w2, d2, h2);
+      }
+    }
+  }
+}
+genCity();
+
+/* =========================================================
+   雨（薄い粒）
+========================================================= */
+const rainCount = 7000;
+const rainGeo = new THREE.BufferGeometry();
+const rainPos = new Float32Array(rainCount*3);
+for(let i=0;i<rainCount;i++){
+  rainPos[i*3+0] = (Math.random()-0.5)*14;
+  rainPos[i*3+1] = Math.random()*12 + 1.0;
+  rainPos[i*3+2] = -Math.random()*105;
+}
+rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos,3));
+const rainMat = new THREE.PointsMaterial({
+  color: 0x00ffff,
+  size: 0.015,
+  transparent: true,
+  opacity: 0.11,
+  depthWrite: false
+});
+const rain = new THREE.Points(rainGeo, rainMat);
+scene.add(rain);
+
+/* =========================================================
+   情報テキスト：Canvas→Texture→Sprite
+========================================================= */
+const POOL = {
+  msg: [
+    "未読メッセージ","既読","返信ください","確認お願いします","至急","了解です","今どこ？","あとで電話",
+    "✅完了","DM","SMS","LINE","通知","リマインド"
+  ],
+  ad: [
+    "今だけ","限定","無料","登録はこちら","SALE","スポンサー","新商品","0円","ポイント還元",
+    "クリック","ダウンロード","キャンペーン","おすすめ"
+  ],
+  internal: [
+    "社内連絡","承認待ち","差し戻し","会議: 14:00","議事録","依頼","対応中","共有","レビューお願いします",
+    "System Log","Syncing...","Update available","Build failed","Deploy"
+  ],
+  news: [
+    "Breaking News","速報","緊急","新着","トレンド","規約更新","重要なお知らせ"
+  ],
+  market: [
+    "BTC +1.2%","USDJPY 147.2","NVDA ↑","NASDAQ ↗","金利","指数","出来高","原油"
+  ],
+  nav: [
+    "目的地まで 12分","迂回します","右折","到着予定 18:45","現在地共有","ルート再計算"
+  ],
+  rec: [
+    "おすすめ","あなたへの提案","次に見る","関連","今人気","フォロー中","レコメンド","最適化中"
+  ],
+  warn: [
+    "⚠️警告","権限がありません","セキュリティ","監視中","異常検知","アクセス拒否","ロック"
+  ],
+  api: [
+    "GET /v1/events 200","POST /login 401","cache hit","rate limit","trace_id=…","latency 120ms",
+    "worker restarted","queue depth 98","auth ok","token refresh"
+  ]
+};
+
+function pick(kind){
+  const arr = POOL[kind] || [];
+  return arr[Math.floor(Math.random()*arr.length)] || "INFO";
+}
+
+function makeTextSprite(text, intensity=1.0){
+  const pad = 12;
+  const font = "16px system-ui, -apple-system, Segoe UI, sans-serif";
+  const cnv = document.createElement("canvas");
+  const cx = cnv.getContext("2d");
+  cx.font = font;
+  const w = Math.ceil(cx.measureText(text).width) + pad*2;
+  const h = 34;
+  cnv.width = w; cnv.height = h;
+
+  cx.clearRect(0,0,w,h);
+  cx.font = font;
+  cx.fillStyle = `rgba(0,255,255,${0.92*intensity})`;
+  cx.shadowColor = `rgba(0,255,255,${0.90*intensity})`;
+  cx.shadowBlur = 14;
+  cx.fillText(text, pad, 22);
+
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.minFilter = THREE.LinearFilter;
+
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false
+  });
+
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(w/210, h/210, 1);
+  sp.userData.text = text;
+  return sp;
+}
+
+/* =========================================================
+   ベクトル場（向きのルール）
+   4系統：道路軸 / 重力 / 壁沿い / 乱流
+========================================================= */
+const vtmp = new THREE.Vector3();
+const vtmp2 = new THREE.Vector3();
+
+function roadAxisFlow(p){
+  // 道路方向（-Z）に強く引っ張る。中心に戻る力も少し。
+  // “水平”ではなく、都市の血流＝Z軸。
+  const toCenterX = -p.x;
+  const f = new THREE.Vector3(
+    toCenterX * 0.35,     // 通り中心へ寄せる
+    0.0,
+    -1.0                 // 奥へ流す
+  );
+  return f;
+}
+
+function gravityFlow(p){
+  // 下へ落ちる
+  return new THREE.Vector3(0, -1.2, 0);
+}
+
+function wallFlow(p){
+  // 壁沿い：左右の壁に吸着したうえで、上下+奥へ這う
+  // どちらの壁かを決めて吸着
+  const side = (p.x >= 0) ? 1 : -1;
+  const wallX = side*(PARAM.canyonHalf + 1.6); // 壁帯
+  const toWall = wallX - p.x;
+
+  // 壁に寄せつつ、上下に流れ、少し奥へ
+  const upDown = Math.sin(p.z*0.25 + p.y*1.7) * 0.7; // うねり
+  return new THREE.Vector3(
+    toWall * 0.65,
+    upDown,
+    -0.55
+  );
+}
+
+function vortexFlow(p, time){
+  // 乱流：渦っぽい漂い（完全ランダム禁止：弱く道路軸へも寄せる）
+  const s = Math.sin(time*0.8 + p.z*0.18);
+  const c = Math.cos(time*0.7 + p.x*0.25);
+  const swirl = new THREE.Vector3(
+    c*0.8,
+    s*0.35,
+    s*c*0.25
+  );
+  // 通り中心への弱い引力
+  swirl.x += (-p.x)*0.10;
+  return swirl;
+}
+
+function applyVectorField(kind, obj, dt, time){
+  const p = obj.sprite.position;
+
+  // 種類別の重み（これが“向き”）
+  // ※水平一択にしない：必ずどれかの軸に寄せる
+  let wRoad=0, wGrav=0, wWall=0, wVort=0;
+
+  switch(kind){
+    case "news":
+    case "market":
+    case "api":
+      wRoad=1.15; wVort=0.18; wWall=0.05; wGrav=0.00;
+      break;
+    case "ad":
+      wGrav=1.20; wVort=0.10; wRoad=0.18; wWall=0.00;
+      break;
+    case "internal":
+    case "warn":
+      wWall=1.10; wVort=0.18; wRoad=0.20; wGrav=0.00;
+      break;
+    case "rec":
+    case "msg":
+    case "nav":
+    default:
+      wVort=0.95; wRoad=0.40; wWall=0.10; wGrav=0.00;
+      break;
+  }
+
+  // 奥行きで減衰（遠景ほど遅い＝“海”が厚くなる）
+  const depthT = THREE.MathUtils.clamp((-p.z) / (PARAM.roadLength*0.95), 0, 1);
+  const depthScale = 1.0 - depthT*0.45;
+
+  // 合成
+  vtmp.set(0,0,0);
+  if(wRoad){
+    vtmp2.copy(roadAxisFlow(p)).multiplyScalar(wRoad);
+    vtmp.add(vtmp2);
+  }
+  if(wGrav){
+    vtmp2.copy(gravityFlow(p)).multiplyScalar(wGrav);
+    vtmp.add(vtmp2);
+  }
+  if(wWall){
+    vtmp2.copy(wallFlow(p)).multiplyScalar(wWall);
+    vtmp.add(vtmp2);
+  }
+  if(wVort){
+    vtmp2.copy(vortexFlow(p, time)).multiplyScalar(wVort);
+    vtmp.add(vtmp2);
+  }
+
+  // 速度の慣性：急に向きが変わらないように補間（重要）
+  const target = vtmp.multiplyScalar(1.2 * PARAM.speedScale * depthScale);
+  obj.vel.lerp(target, 1.0 - Math.pow(0.0005, dt)); // dt依存の安定lerp
+
+  // 種類固有の微調整
+  if(kind==="ad"){
+    // 地面へ吸い込まれる（yが低いほど寿命短縮）
+    if(p.y < 1.2) obj.life -= 1.1*dt;
+  }
+  if(kind==="news" || kind==="market" || kind==="api"){
+    // ティッカー感：横成分を抑えて“流れ”を強調
+    obj.vel.x *= (1.0 - 0.18*dt);
+  }
+}
+
+/* =========================================================
+   情報オブジェクト（密度 + 残像 + 光の筋）
+========================================================= */
+const infoObjs = [];    // {sprite, vel, life, kind, trail:[], weight}
+const trailLines = [];  // {line, obj, max}
+const streaks = [];     // 短命の光の筋
+
+function addInfo(kind){
+  const text = pick(kind);
+  const intense = (kind==="warn"||kind==="news") ? 1.15 : 0.95;
+  const sp = makeTextSprite(text, intense);
+
+  const obj = {
+    kind,
+    sprite: sp,
+    vel: new THREE.Vector3(),
+    life: 7 + Math.random()*14,
+    trail: [],
+    weight: 0.6 + Math.random()*1.1
+  };
+
+  // 初期位置：種類で“発生源”を変える（向きの物語が出る）
+  const zBase = -4 - Math.random()*(PARAM.roadLength-10);
+
+  if(kind==="ad"){
+    sp.position.set((Math.random()-0.5)*4.8, 8.0+Math.random()*4.0, zBase);
+  } else if(kind==="internal" || kind==="warn"){
+    const side = Math.random()<0.5?-1:1;
+    sp.position.set(side*(PARAM.canyonHalf + 1.7 + Math.random()*1.8), 1.6+Math.random()*5.0, zBase);
+  } else if(kind==="news" || kind==="market" || kind==="api"){
+    // 上空の流路（道路軸に吸われる）
+    sp.position.set((Math.random()-0.5)*6.0, 4.5+Math.random()*3.0, -10 - Math.random()*(PARAM.roadLength-10));
+  } else {
+    // 通りの空気（乱流＋道路軸）
+    sp.position.set((Math.random()-0.5)*3.8, 0.8+Math.random()*2.6, zBase);
+  }
+
+  scene.add(sp);
+  infoObjs.push(obj);
+
+  // 残像ライン（更新型）
+  const tg = new THREE.BufferGeometry();
+  const pts = new Float32Array(3 * PARAM.trailMax);
+  tg.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+  const tm = new THREE.LineBasicMaterial({ color:0x00ffff, transparent:true, opacity:0.17, depthWrite:false });
+  const line = new THREE.Line(tg, tm);
+  line.frustumCulled = false;
+  scene.add(line);
+  trailLines.push({ line, obj, max: PARAM.trailMax });
+
+  // 光の筋（密度の芯）
+  if(Math.random() < 0.28){
+    const lg = new THREE.BufferGeometry();
+    const p = new Float32Array(6);
+    lg.setAttribute("position", new THREE.BufferAttribute(p,3));
+    const lm = new THREE.LineBasicMaterial({ color:0x00ffff, transparent:true, opacity:0.22, depthWrite:false });
+    const streak = new THREE.Line(lg, lm);
+    streak.userData.life = 0.25 + Math.random()*0.35;
+    streak.userData.obj = obj;
+    scene.add(streak);
+    streaks.push(streak);
+  }
+}
+
+function spawnOne(){
+  // 比率：現代社会のカオス
+  const r = Math.random();
+  if(r < 0.22) addInfo("msg");
+  else if(r < 0.35) addInfo("internal");
+  else if(r < 0.48) addInfo("rec");
+  else if(r < 0.60) addInfo("ad");
+  else if(r < 0.70) addInfo("api");
+  else if(r < 0.80) addInfo("news");
+  else if(r < 0.90) addInfo("market");
+  else if(r < 0.96) addInfo("warn");
+  else addInfo("nav");
+}
+
+function initialFill(){
+  // 初期から“情報の海”にする（スカスカ撲滅）
+  const n = Math.min(PARAM.maxInfos, 560);
+  for(let i=0;i<n;i++) spawnOne();
+}
+initialFill();
+
+/* =========================================================
+   カメラ操作（ドラッグ見回し・ホイールズーム）
+========================================================= */
+let isDown=false, lx=0, ly=0;
+let yaw=0, pitch=0;
+let targetZoom = 7.4;
+
+addEventListener("mousedown",(e)=>{ isDown=true; lx=e.clientX; ly=e.clientY; });
+addEventListener("mouseup",()=>{ isDown=false; });
+addEventListener("mousemove",(e)=>{
+  if(!isDown) return;
+  const dx = e.clientX-lx, dy = e.clientY-ly;
+  lx=e.clientX; ly=e.clientY;
+  yaw   -= dx*0.0031;
+  pitch -= dy*0.0026;
+  pitch = THREE.MathUtils.clamp(pitch, -0.40, 0.28);
+});
+addEventListener("wheel",(e)=>{
+  targetZoom = THREE.MathUtils.clamp(targetZoom + e.deltaY*0.0025, 3.7, 12.0);
+},{passive:true});
+
+/* =========================================================
+   ホバー覗き見（Raycaster）
+========================================================= */
+const ray = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+addEventListener("mousemove",(e)=>{
+  mouse.x = (e.clientX/innerWidth)*2-1;
+  mouse.y = -(e.clientY/innerHeight)*2+1;
+});
+
+function setHud(text){
+  if(!text){ hud.style.opacity = 0; return; }
+  hud.textContent = text;
+  hud.style.opacity = 1;
+}
+
+/* =========================================================
+   ループ
+========================================================= */
+let last = performance.now();
+let spawnAcc = 0;
+
+function tick(now){
+  const dt = Math.min(0.033, (now-last)/1000);
+  last = now;
+  const time = now*0.001;
+
+  // カメラ（人目線固定）
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZoom, 0.08);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
+  const dir = new THREE.Vector3(0,0,-1).applyQuaternion(q);
+  camera.lookAt(camera.position.clone().add(dir.multiplyScalar(10)).setY(1.55));
+
+  // 雨
+  const rp = rain.geometry.attributes.position.array;
+  for(let i=0;i<rainCount;i++){
+    rp[i*3+1] -= (6.5 + Math.random()*4.5) * dt;
+    rp[i*3+2] += (0.5 + Math.random()*0.6) * dt;
+    if(rp[i*3+1] < 0.2){
+      rp[i*3+1] = 12 + Math.random()*7;
+      rp[i*3+0] = (Math.random()-0.5)*14;
+      rp[i*3+2] = -Math.random()*115;
+    }
+  }
+  rain.geometry.attributes.position.needsUpdate = true;
+
+  // 路面キラ粒：呼吸（湿度）
+  sparkleMat.opacity = 0.12 + 0.12*Math.abs(Math.sin(time*1.05));
+
+  // スポーン（高密度）
+  spawnAcc += dt;
+  while(spawnAcc > PARAM.spawnInterval){
+    spawnAcc -= PARAM.spawnInterval;
+    if(infoObjs.length < PARAM.maxInfos){
+      spawnOne();
+      if(Math.random()<0.55) spawnOne();
+      if(Math.random()<0.22) spawnOne();
+    }
+  }
+
+  // 情報更新（向き＝ベクトル場）
+  for(let i=infoObjs.length-1; i>=0; i--){
+    const o = infoObjs[i];
+    o.life -= dt;
+
+    applyVectorField(o.kind, o, dt, time);
+
+    // 移動
+    o.sprite.position.addScaledVector(o.vel, dt);
+
+    // トレイル
+    o.trail.push(o.sprite.position.clone());
+    if(o.trail.length > PARAM.trailMax) o.trail.shift();
+
+    // 消滅条件（画面外/寿命）
+    const p = o.sprite.position;
+    if(o.life <= 0 || p.y < -2.0 || p.y > 16 || p.x < -18 || p.x > 18 || p.z > 10 || p.z < -140){
+      scene.remove(o.sprite);
+      infoObjs.splice(i,1);
+    }
+  }
+
+  // 残像ライン更新
+  for(let i=trailLines.length-1; i>=0; i--){
+    const t = trailLines[i];
+    const o = t.obj;
+    if(!infoObjs.includes(o)){
+      scene.remove(t.line);
+      trailLines.splice(i,1);
+      continue;
+    }
+    const arr = t.line.geometry.attributes.position.array;
+    const trail = o.trail;
+    const start = Math.max(0, trail.length - t.max);
+
+    let k=0;
+    for(let j=start; j<trail.length; j++){
+      const v = trail[j];
+      arr[k++] = v.x;
+      arr[k++] = v.y;
+      arr[k++] = v.z;
+    }
+    const v0 = trail[0] ?? new THREE.Vector3(0,-10,0);
+    for(; k<arr.length; ){
+      arr[k++] = v0.x; arr[k++] = v0.y; arr[k++] = v0.z;
+    }
+    t.line.geometry.attributes.position.needsUpdate = true;
+
+    // 種類で残像の濃さ
+    const base =
+      (o.kind==="warn"||o.kind==="news") ? 0.24 :
+      (o.kind==="ad") ? 0.14 :
+      (o.kind==="internal") ? 0.18 :
+      0.16;
+    t.line.material.opacity = base * (0.70 + 0.55*o.weight);
+  }
+
+  // 光の筋（短命）
+  for(let i=streaks.length-1;i>=0;i--){
+    const s = streaks[i];
+    s.userData.life -= dt;
+    const o = s.userData.obj;
+    if(!o || !infoObjs.includes(o) || s.userData.life<=0){
+      scene.remove(s);
+      streaks.splice(i,1);
+      continue;
+    }
+    const pos = s.geometry.attributes.position.array;
+    pos[0]=o.sprite.position.x; pos[1]=o.sprite.position.y; pos[2]=o.sprite.position.z;
+    pos[3]=o.sprite.position.x - o.vel.x*0.55;
+    pos[4]=o.sprite.position.y - o.vel.y*0.55;
+    pos[5]=o.sprite.position.z - o.vel.z*0.55;
+    s.geometry.attributes.position.needsUpdate = true;
+    s.material.opacity = 0.06 + 0.28*(s.userData.life/0.6);
+  }
+
+  // ホバー覗き見（スプライトのみ）
+  ray.setFromCamera(mouse, camera);
+  const sprites = infoObjs.map(o=>o.sprite);
+  const hit = ray.intersectObjects(sprites, true)[0];
+  if(hit && hit.object && hit.object.userData.text){
+    setHud(hit.object.userData.text);
+  } else {
+    setHud("");
+  }
+
+  composer.render();
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* =========================================================
+   リサイズ
+========================================================= */
+addEventListener("resize", ()=>{
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
